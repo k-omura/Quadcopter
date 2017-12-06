@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+	<meta charset="utf-8" name="viewport" content="width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0">
+	<title>ESP8266 Drone</title>
+</head>
+<body>
+	<input type="button" id="const-opner" value="Const">
+	<div ontouchmove="event.preventDefault()">
+	  <p id="control"></p>
+	  <p id="message"></p>
+	  <div class="val-box" id="left-val">
+	    <p>z <b id="z">0</b></p>
+	    <p>yaw <b id="yaw">0</b></p>
+	  </div>
+	  <div class="pad" id="left-pad" draggable="true"></div>
+	  <div class="val-box" id="right-val">
+	    <p>roll <b id="roll">0</b></p>
+	    <p>pitch <b id="pitch">0</b></p>
+	  </div>
+	  <div class="pad" id="right-pad" draggable="true"></div>
+		<input type="button" id="motor-trig" value="Start">
+	</div>
+  <div id="const">
+    <input type="range" id="kp" min="0" max="20" step="0.1" value="1">
+		<p>Kp <b id="value-p">1</b></p>
+    <input type="range" id="ki" min="0" max="1" step="0.01" value="0">
+		<p>Ki <b id="value-i">0</b></p>
+    <input type="range" id="kd" min="0" max="20" step="0.1" value="0">
+		<p>Kd <b id="value-d">0</b></p>
+    <input type="button" id="const-send" value="send">
+  </div>
+</body>
+<script>
+	//web socket
+	// var connection = new WebSocket('ws://'+location.hostname+':81/', ['arduino']);
+	var connection = new WebSocket('ws://192.168.4.1:81/', ['arduino']);
+	connection.onopen = function () {
+		document.getElementById('message').textContent = 'Connected!';
+	};
+	connection.onerror = function (error) {
+		document.getElementById('message').textContent = 'error' + error;
+	};
+	connection.onmessage = function (e) {
+		var message = JSON.parse(e.data);
+		if(message.message){
+			document.getElementById('message').textContent = message.message;
+		}else if(message.num){
+			if(message.num == 0){
+				document.getElementById('control').textContent = 'I have control!';
+			}else{
+				document.getElementById('control').textContent = 'I have NO control!';
+			}
+		}
+	};
+	connection.onclose = function(e) {
+		document.getElementById('message').textContent = 'Disconnected!';
+	};
+	//web socket end
+
+	//joy stick
+	var data = {
+		data: {
+			roll: 0,
+			pitch: 0,
+			yaw: 0,
+			z: 0
+		}
+	};
+
+	var leftOfset;
+  document.getElementById('left-pad').addEventListener('touchstart',function(e){
+    e.currentTarget.classList.add('move');
+    leftOfset = {
+			X: e.targetTouches[0].pageX,
+      Y: e.targetTouches[0].pageY
+    }
+  }, false);
+  document.getElementById('left-pad').addEventListener('touchend',function(e){
+    e.currentTarget.classList.remove('move');
+		data.data.yaw = 0;
+		data.data.z = 0;
+		document.getElementById('yaw').textContent = data.data.yaw;
+    document.getElementById('z').textContent = data.data.z;
+		connection.send(JSON.stringify(data));
+  }, false);
+  document.getElementById('left-pad').addEventListener('touchmove',function(e){
+		data.data.yaw = e.targetTouches[0].pageX - leftOfset.X;
+		data.data.z = leftOfset.Y - e.targetTouches[0].pageY;
+    document.getElementById('yaw').textContent = data.data.yaw;
+    document.getElementById('z').textContent = data.data.z;
+		connection.send(JSON.stringify(data));
+  }, false);
+
+	var rightOfset;
+  document.getElementById('right-pad').addEventListener('touchstart',function(e){
+    e.currentTarget.classList.add('move');
+    rightOfset = {
+			X: e.targetTouches[0].pageX,
+      Y: e.targetTouches[0].pageY
+    }
+  }, false);
+  document.getElementById('right-pad').addEventListener('touchend',function(e){
+    e.currentTarget.classList.remove('move');
+		data.data.roll = 0;
+		data.data.pitch = 0;
+		document.getElementById('roll').textContent = data.data.roll;
+    document.getElementById('pitch').textContent = data.data.pitch;
+		connection.send(JSON.stringify(data));
+  }, false);
+  document.getElementById('right-pad').addEventListener('touchmove',function(e){
+		data.data.roll = e.targetTouches[0].pageX - rightOfset.X;
+		data.data.pitch = rightOfset.Y - e.targetTouches[0].pageY;
+    document.getElementById('roll').textContent = data.data.roll;
+    document.getElementById('pitch').textContent = data.data.pitch;
+		connection.send(JSON.stringify(data));
+  }, false);
+	//joy stick end
+
+  //constant set
+  document.getElementById('const-opner').addEventListener('click', function(e){
+    document.getElementById('const').classList.toggle('open');
+  }, false);
+
+  document.getElementById('kp').addEventListener('input', function(e){
+    document.getElementById('value-p').textContent = document.getElementById('kp').value;
+  });
+  document.getElementById('ki').addEventListener('input', function(e){
+    document.getElementById('value-i').textContent = document.getElementById('ki').value;
+  });
+  document.getElementById('kd').addEventListener('input', function(e){
+    document.getElementById('value-d').textContent = document.getElementById('kd').value;
+  });
+  document.getElementById('const-send').addEventListener('click', function(e){
+    var dataConst = {
+  		const: {
+  			kp: parseFloat(document.getElementById('kp').value),
+  			ki: parseFloat(document.getElementById('ki').value),
+  			kd: parseFloat(document.getElementById('kd').value)
+  		}
+  	};
+		connection.send(JSON.stringify(dataConst));
+  });
+  //constant set end
+
+	//motor start/stop button
+	document.getElementById('motor-trig').addEventListener('click', function(e){
+		var start;
+		if(e.currentTarget.value == 'Start'){
+			e.currentTarget.value = 'Stop';
+			start = 1;
+		}else{
+			e.currentTarget.value = 'Start';
+			start = 0;
+		}
+		e.currentTarget.classList.toggle('active');
+    var dataStart = {
+  		start: start
+  	};
+		connection.send(JSON.stringify(dataStart));
+  });
+	//motor start/stop button end
+</script>
+<style>
+  html {
+    height: 100%;
+		overflow: hidden;
+    text-align: center;
+  }
+  body{
+    position: relative;
+		overflow: hidden;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    background-color: rgba(0, 0, 0, 0.6);
+		font-size: 18px;
+  }
+	input[type="button"] {
+		position: relative;
+		height: 25px;
+    width: 100px;
+		font-size: 12px;
+    border: 1px solid rgba(0, 255, 255, 0.75);
+    background-color: hsla(158, 100%, 50%, 0.3);
+	}
+  .val-box{
+    position: absolute;
+    height: 30px;
+    bottom: 180px;
+		font-size: 14px;
+  }
+  #left-val,
+  #left-pad.pad{
+    left: 80px;
+  }
+  #right-val,
+  #right-pad.pad{
+    right: 80px;
+  }
+  .pad{
+    position: absolute;
+    bottom: 80px;
+    width: 70px;
+    height: 70px;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 255, 255, 0.75);
+    background-color: hsla(158, 100%, 50%, 0.3);
+    transition: all 0.2s ease;
+  }
+  .pad.move{
+    background-color: rgba(0, 255, 255, 0.1);
+  }
+  p{
+    margin: 0;
+  }
+	#motor-trig{
+		position: absolute;
+		bottom: 200px;
+		left: calc(50% - 50px);
+	}
+	#motor-trig.active{
+		border: 1px solid rgba(0, 255, 255, 0.75);
+		background-color: hsla(158, 100%, 50%, 0.3);
+	}
+  #const{
+    position: fixed;
+    width: 100%;
+    height: 0;
+    overflow: hidden;
+    background-color: rgba(152, 152, 152, 0.8);
+		font-size: 16px;
+    transition: all 0.2s ease;
+  }
+  #const.open{
+    padding-top: 20px;
+    height: 100%;
+  }
+  #const input[type="range"]{
+    width: 80%;
+  }
+</style>
+</html>
