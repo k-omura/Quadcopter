@@ -1,9 +1,10 @@
 /*
    Drone central controler
 
-   Created on August 28, 2017
+   Created on December 4, 2017
 
    December 4: MPU6050 DMP
+   December 16: PID test 1
 
    ESP8266
    MPU6050
@@ -66,19 +67,20 @@ double elapsedTime, timeNow, timePrev;
 xydetaset PID, error, previous_error;
 xydetaset pid_p, pid_i, pid_d;
 xydetaset desired_angle; //the angle to stay steady
+double desired_yaw, zControl;
 
 //PID constants
-double kp = 3;
+double kp = 1;
 double ki = 0;
 double kd = 0;
-char throttle = 0b100000; //initial value of throttle to the motors
+int throttle = 0b000001; //initial value of throttle to the motors
+int motorOutput[4] = {0};
 
 //WLAN controller
 #define BUFFER_SIZE 16384
-//#define BUFFER_SIZE 30000
 const char *ssid = "ESPAP";
 const char *password = "12345678";
-bool startMotor;
+char startMotor, prevStartMotor;
 uint8_t buf[BUFFER_SIZE];
 ESP8266WebServer server(80);
 WebSocketsServer webSocket = WebSocketsServer(81);
@@ -119,12 +121,12 @@ boolean readHTML() {
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght) {
   switch (type) {
     case WStype_DISCONNECTED:
-      Serial.printf("[%u] Disconnected!\n", num);
+      //Serial.printf("[%u] Disconnected!\n", num);
       startMotor = 0;
       break;
     case WStype_CONNECTED: {
         IPAddress ip = webSocket.remoteIP(num);
-        Serial.printf("[%u] Connected from %d.%d.%d.%d\n", num, ip[0], ip[1], ip[2], ip[3]);
+        //Serial.printf("[%u] Connected from %d.%d.%d.%d\n", num, ip[0], ip[1], ip[2], ip[3]);
 
         // send message to client
         char message[100];
@@ -146,32 +148,61 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
         StaticJsonBuffer<200> jsonBuffer;
         JsonObject& root = jsonBuffer.parseObject(json);
         if (!root.success()) {
-          Serial.println("parse failed");
+          //Serial.println("parse failed");
           return;
         }
         //json parse end
         if (root.containsKey("data")) {
           desired_angle.x = root["data"]["roll"];
           desired_angle.y = root["data"]["pitch"];
-          /*
-            yawTarget = root["data"]["yaw"];
-            zControl = root["data"]["z"];
-            zControl = 1 + zControl / 1000;
-          */
+          desired_yaw = root["data"]["yaw"];
+          zControl = root["data"]["z"];
 
-          // Print values.
-          //Serial.printf("%d %d %d %d\n", rollTarget, pitchTarget, yawTarget, zControl);
+          zControl /= 5;
+          if (zControl < 1) {
+            zControl = 1;
+          } else if (zControl > 0b111111) {
+            zControl = 0b111111;
+          }
+          throttle = (int)zControl;
+
+          //desired value input debug
+          /*
+            Serial.print("Control:\t");
+            Serial.print(desired_angle.x);
+            Serial.print("\t");
+            Serial.print(desired_angle.y);
+            Serial.print("\t");
+            Serial.print(desired_yaw);
+            Serial.print("\t");
+            Serial.println(throttle);
+          */
         } else if (root.containsKey("const")) {
           kp = root["const"]["kp"];
           ki = root["const"]["ki"];
           kd = root["const"]["kd"];
 
-          Serial.printf("kp:%f ki:%f kd:%f\n", kp, ki, kd);
+          //PID input debug
+          /*
+            Serial.print("PID:\t");
+            Serial.print(kp);
+            Serial.print("\t");
+            Serial.print(ki);
+            Serial.print("\t");
+            Serial.println(kd);
+          */
         } else if (root.containsKey("start")) {
-          startMotor = root["start"];
-          //Serial.println(startMotor);
+          startMotor = (int)root["start"];
+
+          //Motor start/stop input debug
+          /*
+            Serial.print("Motor start/stop:\t");
+            Serial.println(startMotor);
+          */
         }
       }
+      break;
+    default:
       break;
   }
 }
@@ -188,15 +219,15 @@ void setup() {
   SPIFFS.begin();
   delay(10);
   if (!readHTML()) {
-    Serial.println("Read HTML error!!");
+    //Serial.println("Read HTML error!!");
   }
   delay(300);
 
   //You can remove the password parameter if you want the AP to be open.
   WiFi.softAP(ssid, password);
-  Serial.println("AP initialize");
+  //Serial.println("AP initialize");
   IPAddress myIP = WiFi.softAPIP();
-  Serial.println(myIP);
+  //Serial.println(myIP);
 
   //start webSocket server
   webSocket.begin();
@@ -239,6 +270,8 @@ void setup() {
 }
 
 void loop() {
+  int motorNum;
+
   //server loop
   webSocket.loop();
   server.handleClient();
@@ -248,7 +281,6 @@ void loop() {
   timeNow = millis();  //actual time read
   elapsedTime = (timeNow - timePrev) / 1000;
 
-  //if programming failed, don't try to do anything
   if (!dmpReady) return;
   while (!mpuInterrupt && fifoCount < packetSize); //wait for MPU interrupt or extra packet(s) available
 
@@ -270,6 +302,7 @@ void loop() {
     mpu.dmpGetQuaternion(&q, fifoBuffer);
     mpu.dmpGetGravity(&gravity, &q);
     mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
+
     /*
       //debug sensor
       Serial.print("ypr\t");
@@ -298,39 +331,51 @@ void loop() {
     pid_d.y = kd * ((error.y - previous_error.y) / elapsedTime);
     PID.y = pid_p.y + pid_i.y + pid_d.y; //The final PID.y values is the sum of each of this 3 parts
 
+    motorOutput[0] = PID.x - PID.y;
+    motorOutput[1] = -PID.x - PID.y;
+    motorOutput[2] = -PID.x + PID.y;
+    motorOutput[3] = PID.x + PID.y;
+
+    //PID output debug
     /*
-        //PID output debug
         Serial.print("PID\t");
-        Serial.print(-PID.x + PID.y); //0b00
+        Serial.print(motorOutput[0]);
         Serial.print("\t");
-        Serial.println(-PID.x - PID.y); //0b01
+        Serial.print(motorOutput[1]);
         Serial.print("\t");
-        Serial.print(PID.x - PID.y); //0b10
+        Serial.print(motorOutput[2]);
         Serial.print("\t");
-        Serial.print(PID.x + PID.y); //0b11
-    */
-    /*
-      eusartTransmit.split.address = 0b01;
-      eusartTransmit.split.data = throttle + PID.x + PID.y;
-      if (eusartTransmit.split.data <= 0) {
-      eusartTransmit.split.data = 1;
-      }
-      if (eusartTransmit.split.data > 0b111111) {
-      eusartTransmit.split.data = 0b111111;
-      }
-      Serial.write(eusartTransmit.raw);
-
-      eusartTransmit.split.address = 0b11;
-      eusartTransmit.split.data = throttle - PID.x - PID.y;
-      if (eusartTransmit.split.data <= 0) {
-      eusartTransmit.split.data = 1;
-      }
-      if (eusartTransmit.split.data > 0b111111) {
-      eusartTransmit.split.data = 0b111111;
-      }
-      Serial.write(eusartTransmit.raw);
+        Serial.println(motorOutput[3]);
     */
 
+    if (startMotor && prevStartMotor) {
+      for (motorNum = 0; motorNum <= 0b11; motorNum++) {
+        eusartTransmit.split.address = motorNum;
+        eusartTransmit.split.data = throttle + motorOutput[motorNum];
+        if (eusartTransmit.split.data <= 0) {
+          eusartTransmit.split.data = 0b000001;
+        }
+        if (eusartTransmit.split.data > 0b111111) {
+          eusartTransmit.split.data = 0b111111;
+        }
+        Serial.write(eusartTransmit.raw);
+      }
+    } else if (startMotor && !prevStartMotor) {
+      for (motorNum = 0; motorNum <= 0b11; motorNum++) {
+        eusartTransmit.split.address = motorNum;
+        eusartTransmit.split.data = 0b000001;
+        delay(2000);
+        Serial.write(eusartTransmit.raw);
+      }
+    } else if (!startMotor) {
+      for (motorNum = 0; motorNum <= 0b11; motorNum++) {
+        eusartTransmit.split.address = motorNum;
+        eusartTransmit.split.data = 0b000000;
+        Serial.write(eusartTransmit.raw);
+      }
+    }
+
+    prevStartMotor = startMotor;
     previous_error.x = error.x; //Remember to store the previous error.x
     previous_error.y = error.y; //Remember to store the previous error.y
   }
