@@ -93,7 +93,7 @@
 #define lockDetectionThreshold 1000
 
 //configurations (Set for A2212 13T 1000KV)
-#define eusartAddress 0b00 //EUSART Lower 2 bits, use as address.
+#define eusartAddress 0b10 //EUSART Lower 2 bits, use as address.
 #define configDirection 1//rotate direction 0:CW /1:CCW /others:stop
 #define configOLDuty 0x30//Open-loop duty
 #define configOLInitialSpeed 200 //Open-loop initial speed
@@ -122,7 +122,7 @@ union eusartReceive {
     unsigned char raw;
 
     struct split {
-        unsigned int address : 2;
+        unsigned int address : 2 ;
         unsigned int data : 6;
     } split;
 } eusartReceive;
@@ -350,7 +350,7 @@ void main(void) {
         if ((eusartReceive.split.address == eusartAddress) && !eusartReceiveDataGet) {
             eusartReceiveDataGet = 1;
             if (eusartReceive.split.data) {
-                CLDuty = (eusartReceive.split.data << 1) + 0b10000001;//Absolute speed control
+                CLDuty = (eusartReceive.split.data << 2) + 0b00000011;//Absolute speed control
             } else {
                 //EUSART input 0
                 reachO2CSpeed = 0;
@@ -436,9 +436,10 @@ char chageDutySmoothly(unsigned char targetDuty, unsigned int acceleration) {
     }
 
     //Preventing step-out by rapid acceleration.
-    if (math_abs(targetDuty - prevDuty) > 200) {
-        acceleration = 150;
+    if (math_abs(targetDuty - prevDuty) > 0) {
+        acceleration = 100;
     }
+    
 
     prevDuty = (targetDuty > prevDuty) ? (prevDuty + 1) : (prevDuty - 1);
     setDuty(prevDuty);
