@@ -436,7 +436,7 @@ char chageDutySmoothly(unsigned char targetDuty, unsigned int acceleration) {
     }
 
     //Preventing step-out by rapid acceleration.
-    if (math_abs(targetDuty - prevDuty) > 30) {
+    if (math_abs(targetDuty - prevDuty) > 200) {
         acceleration = 150;
     }
 
