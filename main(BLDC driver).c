@@ -350,7 +350,7 @@ void main(void) {
         if ((eusartReceive.split.address == eusartAddress) && !eusartReceiveDataGet) {
             eusartReceiveDataGet = 1;
             if (eusartReceive.split.data) {
-                CLDuty = (eusartReceive.split.data << 2) + 0b00000011;//Absolute speed control
+                CLDuty = (eusartReceive.split.data << 1) + 0b10000001;//Absolute speed control
             } else {
                 //EUSART input 0
                 reachO2CSpeed = 0;
@@ -436,8 +436,8 @@ char chageDutySmoothly(unsigned char targetDuty, unsigned int acceleration) {
     }
 
     //Preventing step-out by rapid acceleration.
-    if (math_abs(targetDuty - prevDuty) > 0) {
-        acceleration = 100;
+    if (math_abs(targetDuty - prevDuty) > 128) {
+        acceleration = 50;
     }
     
 
