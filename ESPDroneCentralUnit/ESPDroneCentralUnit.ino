@@ -70,11 +70,14 @@ xydetaset desired_angle; //the angle to stay steady
 double desired_yaw, zControl;
 
 //PID constants
-double kp = 1;
+double kp = 0.01;
 double ki = 0;
 double kd = 0;
-int throttle = 0b000001; //initial value of throttle to the motors
+unsigned int throttle = 0b000001; //initial value of throttle to the motors
 int motorOutput[4] = {0};
+int motorSpeedData = 0;
+#define throttle_max 0b111111
+#define throttle_min 0b000001
 
 //WLAN controller
 #define BUFFER_SIZE 16384
@@ -161,8 +164,8 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
           zControl /= 5;
           if (zControl < 1) {
             zControl = 1;
-          } else if (zControl > 0b111111) {
-            zControl = 0b111111;
+          } else if (zControl > throttle_max) {
+            zControl = throttle_max;
           }
           throttle = (int)zControl;
 
@@ -243,12 +246,12 @@ void setup() {
   devStatus = mpu.dmpInitialize(); //load and configure the DMP
 
   //supply your own gyro offsets here, scaled for min sensitivity
-  mpu.setXAccelOffset(-4577);
-  mpu.setYAccelOffset(-165);
-  mpu.setZAccelOffset(1772); //1688 factory default for my test chip
-  mpu.setXGyroOffset(120);
-  mpu.setYGyroOffset(-46);
-  mpu.setZGyroOffset(22);
+  mpu.setXAccelOffset(-4721);
+  mpu.setYAccelOffset(-4781);
+  mpu.setZAccelOffset(1853);
+  mpu.setXGyroOffset(-32);
+  mpu.setYGyroOffset(36);
+  mpu.setZGyroOffset(100);
 
   //make sure it worked (returns 0 if so)
   if (devStatus == 0) {
@@ -351,20 +354,21 @@ void loop() {
     if (startMotor && prevStartMotor) {
       for (motorNum = 0; motorNum <= 0b11; motorNum++) {
         eusartTransmit.split.address = motorNum;
-        eusartTransmit.split.data = throttle + motorOutput[motorNum];
-        if (eusartTransmit.split.data <= 0) {
-          eusartTransmit.split.data = 0b000001;
+        motorSpeedData = throttle + motorOutput[motorNum];
+        if (motorSpeedData <= 0) {
+          motorSpeedData = 0b000001;
         }
-        if (eusartTransmit.split.data > 0b111111) {
-          eusartTransmit.split.data = 0b111111;
+        if (motorSpeedData > 0b111111) {
+          motorSpeedData = 0b111111;
         }
+        eusartTransmit.split.data = motorSpeedData;
         Serial.write(eusartTransmit.raw);
       }
     } else if (startMotor && !prevStartMotor) {
       for (motorNum = 0; motorNum <= 0b11; motorNum++) {
         eusartTransmit.split.address = motorNum;
         eusartTransmit.split.data = 0b000001;
-        delay(2000);
+        delay(1000);
         Serial.write(eusartTransmit.raw);
       }
     } else if (!startMotor) {
@@ -376,7 +380,6 @@ void loop() {
     }
 
     prevStartMotor = startMotor;
-    previous_error.x = error.x; //Remember to store the previous error.x
-    previous_error.y = error.y; //Remember to store the previous error.y
+    previous_error = error; //Remember to store the previous error
   }
 }
