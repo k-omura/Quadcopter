@@ -3,8 +3,9 @@
 
    Created on December 4, 2017
 
-   December 4: MPU6050 DMP
-   December 16: PID test 1
+   December 4, 2017: MPU6050 DMP
+   December 16, 2017: PID test
+   January 21, 2018: Organize programme
 
    ESP8266
    MPU6050
