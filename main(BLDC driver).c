@@ -95,8 +95,8 @@
 
 //configurations (Set for A2212 13T 1000KV)
 #define eusartAddress 0b00 //EUSART Lower 2 bits, use as address.
-#define configDirection 0//rotate direction 0:CW /1:CCW /others:stop
-#define configOLDuty 0x1e//Open-loop duty
+#define configDirection 1 //rotate direction 0:CW /1:CCW /others:stop
+#define configOLDuty 0b00010001 //Open-loop duty
 #define configOLInitialSpeed 200 //Open-loop initial speed
 #define configOpenToLoopSpeed 40 //Open to close speed (Open-loop max speed)
 #define configOLaccelerate 2 //Open-loop "OLInitialSpeed" to "openToLoopSpeed" acceleration
@@ -354,7 +354,7 @@ void main(void) {
         if ((eusartReceive.split.address == eusartAddress) && !eusartReceiveDataGet) {
             eusartReceiveDataGet = 1;
             if (eusartReceive.split.data) {
-                CLDuty = eusartReceive.split.data + 0b00000011;//Absolute speed control
+                CLDuty = (eusartReceive.split.data << 2) + 0b00000011;//Absolute speed control
             } else {
                 //EUSART input 0
                 reachO2CSpeed = 0;
@@ -440,7 +440,7 @@ char chageDutySmoothly(unsigned int targetDuty, unsigned int acceleration) {
     }
 
     //Preventing step-out by rapid acceleration.
-    if (math_abs(targetDuty - prevDuty) > 64) {
+    if (math_abs(targetDuty - prevDuty) > 128) {
         acceleration = 100;
     }
 
