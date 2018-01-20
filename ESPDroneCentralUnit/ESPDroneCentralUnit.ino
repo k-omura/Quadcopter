@@ -27,7 +27,7 @@
 MPU6050 mpu;
 //MPU6050 mpu(0x69); //<-- use for AD0 high
 
-#define INTERRUPT_PIN 15
+#define MPU6050_INTERRUPT_PIN 15
 
 //union transmit USART data
 union eusartTransmit {
@@ -45,24 +45,22 @@ typedef struct {
 } xydetaset;
 
 //vars MPU control/status
-bool dmpReady = false;  //set true if DMP init was successful
-uint8_t mpuIntStatus;   //holds actual interrupt status byte from MPU
-uint8_t devStatus;      //return status after each device operation (0 = success, !0 = error)
-uint16_t packetSize;    //expected DMP packet size (default is 42 bytes)
-uint16_t fifoCount;     //count of all bytes currently in FIFO
+bool dmpReady = false; //set true if DMP init was successful
+uint8_t mpuIntStatus; //holds actual interrupt status byte from MPU
+uint8_t devStatus; //return status after each device operation (0 = success, !0 = error)
+uint16_t packetSize; //expected DMP packet size (default is 42 bytes)
+uint16_t fifoCount; //count of all bytes currently in FIFO
 uint8_t fifoBuffer[64]; //FIFO storage buffer
 
 //vars orientation/motion
-Quaternion q;           //[w, x, y, z]         quaternion container
-VectorInt16 aa;         //[x, y, z]            accel sensor measurements
-VectorInt16 aaReal;     //[x, y, z]            gravity-free accel sensor measurements
-VectorInt16 aaWorld;    //[x, y, z]            world-frame accel sensor measurements
-VectorFloat gravity;    //[x, y, z]            gravity vector
-float euler[3];         //[psi, theta, phi]    Euler angle container
-float ypr[3];           //[yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
+Quaternion q; //[w, x, y, z] quaternion container
+VectorFloat gravity; //[x, y, z] gravity vector
+float euler[3]; //[psi, theta, phi] Euler angle container
+float ypr[3]; //[yaw, pitch, roll] yaw/pitch/roll container and gravity vector
 
 //vars PID control balance
-double elapsedTime, timeNow, timePrev;
+unsigned long timeNow, timePrev;
+double elapsedTime;
 
 xydetaset PID, error, previous_error;
 xydetaset pid_p, pid_i, pid_d;
@@ -70,7 +68,7 @@ xydetaset desired_angle; //the angle to stay steady
 double desired_yaw, zControl;
 
 //PID constants
-double kp = 0.01;
+double kp = 0;
 double ki = 0;
 double kd = 0;
 unsigned int throttle = 0b000001; //initial value of throttle to the motors
@@ -89,7 +87,7 @@ ESP8266WebServer server(80);
 WebSocketsServer webSocket = WebSocketsServer(81);
 
 //interrupt detection routine
-volatile bool mpuInterrupt = false;     //indicates whether MPU interrupt pin has gone high
+volatile bool mpuInterrupt = false; //indicates whether MPU interrupt pin has gone high
 void dmpDataReady() {
   mpuInterrupt = true;
 }
@@ -166,6 +164,8 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
             zControl = 1;
           } else if (zControl > throttle_max) {
             zControl = throttle_max;
+          } else if (zControl < throttle_min) {
+            zControl = throttle_min;
           }
           throttle = (int)zControl;
 
@@ -214,7 +214,7 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
 void setup() {
   Wire.begin(2, 14);
   Serial.begin(115200); //initialize serial communication
-  pinMode(INTERRUPT_PIN, INPUT);
+  pinMode(MPU6050_INTERRUPT_PIN, INPUT);
   while (!Serial);
 
   //server setting
@@ -246,17 +246,28 @@ void setup() {
   devStatus = mpu.dmpInitialize(); //load and configure the DMP
 
   //supply your own gyro offsets here, scaled for min sensitivity
-  mpu.setXAccelOffset(-4721);
-  mpu.setYAccelOffset(-4781);
-  mpu.setZAccelOffset(1853);
-  mpu.setXGyroOffset(-32);
-  mpu.setYGyroOffset(36);
-  mpu.setZGyroOffset(100);
+  //1
+  /*
+    mpu.setXAccelOffset(-4721);
+    mpu.setYAccelOffset(-4781);
+    mpu.setZAccelOffset(1853);
+    mpu.setXGyroOffset(-32);
+    mpu.setYGyroOffset(36);
+    mpu.setZGyroOffset(100);
+  */
+
+  //2
+  mpu.setXAccelOffset(-1834);
+  mpu.setYAccelOffset(-907);
+  mpu.setZAccelOffset(677);
+  mpu.setXGyroOffset(184);
+  mpu.setYGyroOffset(-1);
+  mpu.setZGyroOffset(-14);
 
   //make sure it worked (returns 0 if so)
   if (devStatus == 0) {
     mpu.setDMPEnabled(true); //turn on the DMP, now that it's ready
-    attachInterrupt(INTERRUPT_PIN, dmpDataReady, RISING); //enable Arduino interrupt detection
+    attachInterrupt(MPU6050_INTERRUPT_PIN, dmpDataReady, RISING); //enable Arduino interrupt detection
     mpuIntStatus = mpu.getIntStatus();
     dmpReady = true; //set our DMP Ready flag so the main loop() function knows it's okay to use it
     packetSize = mpu.dmpGetFIFOPacketSize(); //get expected DMP packet size for later comparison
@@ -268,7 +279,7 @@ void setup() {
   }
   //sensor settings end
 
-  timeNow = millis(); //Start counting time in milliseconds]
+  timeNow = micros(); //Start counting time
   delay(500);
 }
 
@@ -279,10 +290,6 @@ void loop() {
   webSocket.loop();
   server.handleClient();
   //server loop end
-
-  timePrev = timeNow;  //the previous time is stored before the actual time read
-  timeNow = millis();  //actual time read
-  elapsedTime = (timeNow - timePrev) / 1000;
 
   if (!dmpReady) return;
   while (!mpuInterrupt && fifoCount < packetSize); //wait for MPU interrupt or extra packet(s) available
@@ -297,6 +304,10 @@ void loop() {
   if ((mpuIntStatus & 0x10) || fifoCount == 1024) {
     mpu.resetFIFO(); //reset so we can continue cleanly
   } else if (mpuIntStatus & 0x02) {
+    timePrev = timeNow; //the previous time is stored before the actual time read
+    timeNow = micros(); //actual time read
+    elapsedTime = (timeNow - timePrev) / 1000000;
+
     while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount(); //wait for correct available data length, should be a VERY short wait
     mpu.getFIFOBytes(fifoBuffer, packetSize); //read a packet from FIFO
     fifoCount -= packetSize; //track FIFO count here in case there is > 1 packet available
@@ -320,7 +331,9 @@ void loop() {
     error.x = (ypr[1] * 180 / M_PI) - desired_angle.x;
     pid_p.x = kp * error.x;
     if (-3 < error.x < 3) {
-      pid_i.x = pid_i.x + (ki * error.x);
+      pid_i.x += (ki * error.x);
+    } else {
+      pid_i.x = 0;
     }
     pid_d.x = kd * ((error.x - previous_error.x) / elapsedTime);
     PID.x = pid_p.x + pid_i.x + pid_d.x; //The final PID.x values is the sum of each of this 3 parts
@@ -329,7 +342,9 @@ void loop() {
     error.y = (ypr[2] * 180 / M_PI) - desired_angle.y;
     pid_p.y = kp * error.y;
     if (-3 < error.y < 3) {
-      pid_i.y = pid_i.y + (ki * error.y);
+      pid_i.y += (ki * error.y);
+    } else {
+      pid_i.y = 0;
     }
     pid_d.y = kd * ((error.y - previous_error.y) / elapsedTime);
     PID.y = pid_p.y + pid_i.y + pid_d.y; //The final PID.y values is the sum of each of this 3 parts
@@ -355,10 +370,9 @@ void loop() {
       for (motorNum = 0; motorNum <= 0b11; motorNum++) {
         eusartTransmit.split.address = motorNum;
         motorSpeedData = throttle + motorOutput[motorNum];
-        if (motorSpeedData <= 0) {
+        if (motorSpeedData < 0b000001) {
           motorSpeedData = 0b000001;
-        }
-        if (motorSpeedData > 0b111111) {
+        } else if (motorSpeedData > 0b111111) {
           motorSpeedData = 0b111111;
         }
         eusartTransmit.split.data = motorSpeedData;
@@ -368,7 +382,7 @@ void loop() {
       for (motorNum = 0; motorNum <= 0b11; motorNum++) {
         eusartTransmit.split.address = motorNum;
         eusartTransmit.split.data = 0b000001;
-        delay(1000);
+        delay(1500);
         Serial.write(eusartTransmit.raw);
       }
     } else if (!startMotor) {
