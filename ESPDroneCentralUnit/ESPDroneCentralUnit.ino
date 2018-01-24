@@ -72,9 +72,10 @@ double desired_yaw, zControl;
 double kp = 0;
 double ki = 0;
 double kd = 0;
-unsigned int throttle = 0b000001; //initial value of throttle to the motors
+int throttle = 0b000001; //initial value of throttle to the motors
 int motorOutput[4] = {0};
 int motorSpeedData = 0;
+#define PID_sampleTime 10000 //micro second
 #define throttle_max 0b111111
 #define throttle_min 0b000001
 
@@ -247,7 +248,7 @@ void setup() {
   devStatus = mpu.dmpInitialize(); //load and configure the DMP
 
   //supply your own gyro offsets here, scaled for min sensitivity
-  //1
+  //1st board
   /*
     mpu.setXAccelOffset(-4721);
     mpu.setYAccelOffset(-4781);
@@ -257,7 +258,7 @@ void setup() {
     mpu.setZGyroOffset(100);
   */
 
-  //2
+  //2nd board
   mpu.setXAccelOffset(-1834);
   mpu.setYAccelOffset(-907);
   mpu.setZAccelOffset(677);
@@ -280,8 +281,9 @@ void setup() {
   }
   //sensor settings end
 
-  timeNow = micros(); //Start counting time
   delay(500);
+  timePrev = micros(); //Start counting time
+  startMotor = 0;
 }
 
 void loop() {
@@ -293,7 +295,7 @@ void loop() {
   //server loop end
 
   if (!dmpReady) return;
-  while (!mpuInterrupt && fifoCount < packetSize); //wait for MPU interrupt or extra packet(s) available
+  while (!mpuInterrupt && (fifoCount < packetSize)); //wait for MPU interrupt or extra packet(s) available
 
   //reset interrupt flag and get INT_STATUS byte
   mpuInterrupt = false;
@@ -301,13 +303,13 @@ void loop() {
 
   fifoCount = mpu.getFIFOCount(); //get current FIFO count
 
+  timeNow = micros(); //actual time read
   //check for overflow (this should never happen unless our code is too inefficient)
-  if ((mpuIntStatus & 0x10) || fifoCount == 1024) {
+  if ((mpuIntStatus & 0x10) || (fifoCount == 1024)) {
     mpu.resetFIFO(); //reset so we can continue cleanly
-  } else if (mpuIntStatus & 0x02) {
+  } else if ((mpuIntStatus & 0x02) && ((timeNow - timePrev) >= PID_sampleTime))  {
+    elapsedTime = (double)(timeNow - timePrev) / 1000000;
     timePrev = timeNow; //the previous time is stored before the actual time read
-    timeNow = micros(); //actual time read
-    elapsedTime = (timeNow - timePrev) / 1000000;
 
     while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount(); //wait for correct available data length, should be a VERY short wait
     mpu.getFIFOBytes(fifoBuffer, packetSize); //read a packet from FIFO
@@ -319,19 +321,22 @@ void loop() {
     mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
 
     /*
-      //debug sensor
-      Serial.print("ypr\t");
-      Serial.print(ypr[0] * 180 / M_PI);
-      Serial.print("\t");
-      Serial.print(ypr[1] * 180 / M_PI);
-      Serial.print("\t");
-      Serial.println(ypr[2] * 180 / M_PI);
+        //debug sensor
+        Serial.print("ypr\t");
+        Serial.print(ypr[0] * 180 / M_PI);
+        Serial.print("\t");
+        Serial.print(ypr[1] * 180 / M_PI);
+        Serial.print("\t");
+        Serial.print(ypr[2] * 180 / M_PI);
+        Serial.print("\t");
+        Serial.print(elapsedTime, 5);
+        Serial.println();
     */
 
     //PID control x
     error.x = (ypr[1] * 180 / M_PI) - desired_angle.x;
     pid_p.x = kp * error.x;
-    if (-3 < error.x < 3) {
+    if ((-5 < error.x) && (error.x < 5)) {
       pid_i.x += (ki * error.x);
     } else {
       pid_i.x = 0;
@@ -342,7 +347,7 @@ void loop() {
     //PID control y
     error.y = (ypr[2] * 180 / M_PI) - desired_angle.y;
     pid_p.y = kp * error.y;
-    if (-3 < error.y < 3) {
+    if ((-5 < error.y) && (error.y < 5)) {
       pid_i.y += (ki * error.y);
     } else {
       pid_i.y = 0;
@@ -350,10 +355,10 @@ void loop() {
     pid_d.y = kd * ((error.y - previous_error.y) / elapsedTime);
     PID.y = pid_p.y + pid_i.y + pid_d.y; //The final PID.y values is the sum of each of this 3 parts
 
-    motorOutput[0] = PID.x - PID.y;
-    motorOutput[1] = -PID.x - PID.y;
-    motorOutput[2] = -PID.x + PID.y;
-    motorOutput[3] = PID.x + PID.y;
+    motorOutput[0] = (int)(PID.x - PID.y);
+    motorOutput[1] = (int)(-PID.x - PID.y);
+    motorOutput[2] = (int)(-PID.x + PID.y);
+    motorOutput[3] = (int)(PID.x + PID.y);
 
     //PID output debug
     /*
@@ -364,7 +369,8 @@ void loop() {
         Serial.print("\t");
         Serial.print(motorOutput[2]);
         Serial.print("\t");
-        Serial.println(motorOutput[3]);
+        Serial.print(motorOutput[3]);
+        Serial.println();
     */
 
     if (startMotor && prevStartMotor) {
@@ -383,8 +389,8 @@ void loop() {
       for (motorNum = 0; motorNum <= 0b11; motorNum++) {
         eusartTransmit.split.address = motorNum;
         eusartTransmit.split.data = 0b000001;
-        delay(1500);
         Serial.write(eusartTransmit.raw);
+        delay(1500);
       }
     } else if (!startMotor) {
       for (motorNum = 0; motorNum <= 0b11; motorNum++) {
@@ -394,7 +400,8 @@ void loop() {
       }
     }
 
+    //Remember to store the previous condition
     prevStartMotor = startMotor;
-    previous_error = error; //Remember to store the previous error
+    previous_error = error;
   }
 }
