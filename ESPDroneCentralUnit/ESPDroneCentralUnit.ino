@@ -31,14 +31,16 @@ MPU6050 mpu;
 #define MPU6050_INTERRUPT_PIN 15
 
 //union transmit USART data
-union eusartTransmit {
+#define nextIsYourData 0b000001
+typedef union {
   unsigned char raw;
 
   struct split {
     unsigned int address : 2;
     unsigned int data : 6;
   } split;
-} eusartTransmit;
+} eusartFormat;
+eusartFormat eusartTransmit;
 
 typedef struct {
   double x;
@@ -75,7 +77,7 @@ double kd = 0;
 int throttle = 0b000001; //initial value of throttle to the motors
 int motorOutput[4] = {0};
 int motorSpeedData = 0;
-#define PID_sampleTime 10000 //micro second
+#define PID_sampleTime 100000 //micro second
 #define throttle_max 0b111111
 #define throttle_min 0b000001
 
@@ -215,8 +217,9 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
 //setup
 void setup() {
   Wire.begin(2, 14);
-  Serial.begin(115200); //initialize serial communication
   pinMode(MPU6050_INTERRUPT_PIN, INPUT);
+
+  Serial.begin(115200); //initialize serial communication
   while (!Serial);
 
   //server setting
@@ -377,12 +380,13 @@ void loop() {
       for (motorNum = 0; motorNum <= 0b11; motorNum++) {
         eusartTransmit.split.address = motorNum;
         motorSpeedData = throttle + motorOutput[motorNum];
-        if (motorSpeedData < 0b000001) {
-          motorSpeedData = 0b000001;
+        if (motorSpeedData <= 0b000001) {
+          motorSpeedData = 0b000010;
         } else if (motorSpeedData > 0b111111) {
           motorSpeedData = 0b111111;
         }
         eusartTransmit.split.data = motorSpeedData;
+        Serial.write(eusartTransmit.raw);
         Serial.write(eusartTransmit.raw);
       }
     } else if (startMotor && !prevStartMotor) {
@@ -390,12 +394,14 @@ void loop() {
         eusartTransmit.split.address = motorNum;
         eusartTransmit.split.data = 0b000001;
         Serial.write(eusartTransmit.raw);
+        Serial.write(eusartTransmit.raw);
         delay(1500);
       }
     } else if (!startMotor) {
       for (motorNum = 0; motorNum <= 0b11; motorNum++) {
         eusartTransmit.split.address = motorNum;
         eusartTransmit.split.data = 0b000000;
+        Serial.write(eusartTransmit.raw);
         Serial.write(eusartTransmit.raw);
       }
     }
