@@ -92,15 +92,16 @@
 #define motorADCThreshold 0x80 // (Vmotor / 2) Adjust the value by looking at the oscilloscope, if necessary.
 #define CLLockDetectionThreshold 1000
 #define OLLockDetectionThreshold 800
+#define maximumSpeedDifference 80 //Correspond to irregular input due to noise
 
 //configurations (Set for A2212 13T 1000KV)
-#define eusartAddress 0b00 //EUSART Lower 2 bits, use as address.
-#define configDirection 1 //rotate direction 0:CW /1:CCW /others:stop
+#define eusartAddress 0b01 //EUSART Lower 2 bits, use as address.
+#define configDirection 0 //rotate direction 0:CW /1:CCW /others:stop
 #define configOLDuty 0b00010001 //Open-loop duty
 #define configOLInitialSpeed 200 //Open-loop initial speed
 #define configOpenToLoopSpeed 40 //Open to close speed (Open-loop max speed)
 #define configOLaccelerate 2 //Open-loop "OLInitialSpeed" to "openToLoopSpeed" acceleration
-#define configCLaccelerate 5 //Closed-loop acceleration
+#define configCLaccelerate 4 //Closed-loop acceleration
 //configurations end
 
 //functions
@@ -116,16 +117,19 @@ unsigned char direction; //rotation direction. 0, 1, others
 unsigned char CLEnable = 0;
 unsigned char reachO2CSpeed = 0;
 unsigned char LockDetected = 0;
+unsigned char next = 0;
 
 unsigned char eusartReceiveDataGet = 0; //flag read value
-union eusartReceive {
+
+typedef union {
     unsigned char raw;
 
     struct split {
         unsigned int address : 2;
         unsigned int data : 6;
     } split;
-} eusartReceive;
+} eusartFormat;
+eusartFormat eusartReceive;
 
 //const
 const unsigned char ADCPortCHS[3] = {0b00, 0b01, 0b11};
@@ -151,8 +155,8 @@ const unsigned char feedBackConstant[2][6] = {
 void interrupt isr() {
     static unsigned char ADCPortNum = 0; //counter for ADCPortCHS
     static unsigned char ADCValue[3] = {0};
-    static unsigned int CLLockDetectionCount = 0;
-    static unsigned int OLLockDetectionCount = 0;
+    static unsigned int CLLockDetectionCount = 0, OLLockDetectionCount = 0;
+    static int eusartReceiveData = 0, prevEusartReceiveData = 0;
 
     unsigned char BEMFValue;
 
@@ -199,12 +203,16 @@ void interrupt isr() {
         PIR1bits.ADIF = 0;
     }
     if (PIR1bits.RCIF) {
-        if (RCSTAbits.OERR || RCSTAbits.FERR) {
+        if (RCSTAbits.OERR || RCSTAbits.FERR) {//error
             RCSTAbits.CREN = 0;
-            eusartReceive.raw = RCREG;
+            eusartReceiveData = RCREG;
             RCSTAbits.CREN = 1;
         } else {
-            eusartReceive.raw = RCREG;
+            eusartReceiveData = RCREG;
+            if (eusartReceiveData == prevEusartReceiveData) {
+                eusartReceive.raw = eusartReceiveData;
+            }
+            prevEusartReceiveData = eusartReceiveData;
             eusartReceiveDataGet = 0;
         }
         PIR1bits.RCIF = 0;
@@ -213,7 +221,7 @@ void interrupt isr() {
     if (INTCONbits.TMR0IF) {
         INTCONbits.TMR0IF = 0;
     }
-    */
+     */
 
     return;
 }
@@ -270,7 +278,11 @@ void main(void) {
     RCSTA = 0b10010000;
     BAUDCON = 0b00001000; //16-bit Baud Rate Generator
     SPBRGH = 0;
-    SPBRG = 68; //Baud Rate 115200 (Formula: 115942.029)
+    SPBRG = 68; //Baud Rate 9600 (Formula: 9603.842)
+    /*
+     * SPBRG = 138; //Baud Rate 57600 (Formula: 57553.957)
+     * SPBRG = 68; //Baud Rate 115200 (Formula: 115942.029)
+     */
 
     //start timer 0
     T0CONbits.TMR0ON = 0;
@@ -294,7 +306,7 @@ void main(void) {
     unsigned int CLDuty, CLaccelerate, CLInitialSpeedReached;
 
     //var others
-    int duty, eusartReceiveData;
+    int duty;
 
     //Initial configuration
     direction = configDirection; //rotate direction 0:CW /1:CCW /others:stop
@@ -309,7 +321,6 @@ void main(void) {
     LockDetected = 1; //motor is stopped in the initial state.
     CLDuty = 0;
     CLInitialSpeedReached = 0;
-    eusartReceiveData = 0;
     //initialize end
 
     //main motor control part
@@ -349,12 +360,12 @@ void main(void) {
             //CLDuty = 0xff; //test constant speed CL-drive value
             duty = CLDuty;
         }
-        
+
         //Processing EUSART speed input 
         if ((eusartReceive.split.address == eusartAddress) && !eusartReceiveDataGet) {
             eusartReceiveDataGet = 1;
             if (eusartReceive.split.data) {
-                CLDuty = (eusartReceive.split.data << 2) + 0b00000011;//Absolute speed control
+                CLDuty = (eusartReceive.split.data << 2) + 0b00000011;
             } else {
                 //EUSART input 0
                 reachO2CSpeed = 0;
@@ -440,8 +451,13 @@ char chageDutySmoothly(unsigned int targetDuty, unsigned int acceleration) {
     }
 
     //Preventing step-out by rapid acceleration.
+    /*
     if (math_abs(targetDuty - prevDuty) > 128) {
         acceleration = 100;
+    }
+     */
+    if (targetDuty < 64) {
+        acceleration = 150;
     }
 
     prevDuty = (targetDuty > prevDuty) ? (prevDuty + 1) : (prevDuty - 1);
