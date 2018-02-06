@@ -31,7 +31,6 @@ MPU6050 mpu;
 #define MPU6050_INTERRUPT_PIN 15
 
 //union transmit USART data
-#define nextIsYourData 0b000001
 typedef union {
   unsigned char raw;
 
