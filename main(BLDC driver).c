@@ -92,16 +92,15 @@
 #define motorADCThreshold 0x80 // (Vmotor / 2) Adjust the value by looking at the oscilloscope, if necessary.
 #define CLLockDetectionThreshold 1000
 #define OLLockDetectionThreshold 800
-#define maximumSpeedDifference 80 //Correspond to irregular input due to noise
 
 //configurations (Set for A2212 13T 1000KV)
-#define eusartAddress 0b01 //EUSART Lower 2 bits, use as address.
-#define configDirection 0 //rotate direction 0:CW /1:CCW /others:stop
+#define eusartAddress 0b10 //EUSART Lower 2 bits, use as address.
+#define configDirection 1 //rotate direction 0:CW /1:CCW /others:stop
 #define configOLDuty 0b00010001 //Open-loop duty
 #define configOLInitialSpeed 200 //Open-loop initial speed
-#define configOpenToLoopSpeed 40 //Open to close speed (Open-loop max speed)
+#define configOpenToLoopSpeed 50 //Open to close speed (Open-loop max speed)
 #define configOLaccelerate 2 //Open-loop "OLInitialSpeed" to "openToLoopSpeed" acceleration
-#define configCLaccelerate 4 //Closed-loop acceleration
+#define configCLaccelerate 50 //Closed-loop acceleration
 //configurations end
 
 //functions
@@ -117,7 +116,6 @@ unsigned char direction; //rotation direction. 0, 1, others
 unsigned char CLEnable = 0;
 unsigned char reachO2CSpeed = 0;
 unsigned char LockDetected = 0;
-unsigned char next = 0;
 
 unsigned char eusartReceiveDataGet = 0; //flag read value
 
@@ -209,6 +207,7 @@ void interrupt isr() {
             RCSTAbits.CREN = 1;
         } else {
             eusartReceiveData = RCREG;
+            //Correspond to irregular input due to noise
             if (eusartReceiveData == prevEusartReceiveData) {
                 eusartReceive.raw = eusartReceiveData;
             }
@@ -365,7 +364,7 @@ void main(void) {
         if ((eusartReceive.split.address == eusartAddress) && !eusartReceiveDataGet) {
             eusartReceiveDataGet = 1;
             if (eusartReceive.split.data) {
-                CLDuty = (eusartReceive.split.data << 2) + 0b00000011;
+                CLDuty = (eusartReceive.split.data << 1) + 0b10000001;
             } else {
                 //EUSART input 0
                 reachO2CSpeed = 0;
@@ -456,10 +455,7 @@ char chageDutySmoothly(unsigned int targetDuty, unsigned int acceleration) {
         acceleration = 100;
     }
      */
-    if (targetDuty < 64) {
-        acceleration = 150;
-    }
-
+    
     prevDuty = (targetDuty > prevDuty) ? (prevDuty + 1) : (prevDuty - 1);
     setDuty(prevDuty);
 
