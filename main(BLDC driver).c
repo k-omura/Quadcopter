@@ -94,13 +94,13 @@
 #define OLLockDetectionThreshold 800
 
 //configurations (Set for A2212 13T 1000KV)
-#define eusartAddress 0b10 //EUSART Lower 2 bits, use as address.
-#define configDirection 1 //rotate direction 0:CW /1:CCW /others:stop
+#define eusartAddress 0b11 //EUSART Lower 2 bits, use as address.
+#define configDirection 0 //rotate direction 0:CW /1:CCW /others:stop
 #define configOLDuty 0b00010001 //Open-loop duty
 #define configOLInitialSpeed 200 //Open-loop initial speed
 #define configOpenToLoopSpeed 50 //Open to close speed (Open-loop max speed)
 #define configOLaccelerate 2 //Open-loop "OLInitialSpeed" to "openToLoopSpeed" acceleration
-#define configCLaccelerate 50 //Closed-loop acceleration
+#define configCLaccelerate 30 //Closed-loop acceleration
 //configurations end
 
 //functions
@@ -306,6 +306,7 @@ void main(void) {
 
     //var others
     int duty;
+    unsigned char reachTargetSpeed = 1; //flag 
 
     //Initial configuration
     direction = configDirection; //rotate direction 0:CW /1:CCW /others:stop
@@ -321,6 +322,8 @@ void main(void) {
     CLDuty = 0;
     CLInitialSpeedReached = 0;
     //initialize end
+    
+    __delay_ms(1000);
 
     //main motor control part
     while (1) {
@@ -335,6 +338,7 @@ void main(void) {
                 LockDetected = 0;
                 CLInitialSpeedReached = 0;
                 reachO2CSpeed = 0;
+                reachTargetSpeed = 1;
                 //initialize end
             }
 
@@ -355,9 +359,10 @@ void main(void) {
                 __delay_us(10);
             }
         } else { //Closed-loop
-            chageDutySmoothly(duty, CLaccelerate);
-            //CLDuty = 0xff; //test constant speed CL-drive value
-            duty = CLDuty;
+            reachTargetSpeed = chageDutySmoothly(duty, CLaccelerate);
+            if (reachTargetSpeed) {
+                duty = CLDuty;
+            }
         }
 
         //Processing EUSART speed input 
@@ -374,6 +379,7 @@ void main(void) {
                 CLDuty = 0;
                 CLInitialSpeedReached = 0;
                 LockDetected = 1;
+                reachTargetSpeed = 0;
             }
         }
     }
@@ -455,9 +461,13 @@ char chageDutySmoothly(unsigned int targetDuty, unsigned int acceleration) {
         acceleration = 100;
     }
      */
-    
+
     prevDuty = (targetDuty > prevDuty) ? (prevDuty + 1) : (prevDuty - 1);
     setDuty(prevDuty);
+
+    if (targetDuty == prevDuty) {
+        return 1;
+    }
 
     for (accelerateCount = 0; accelerateCount < acceleration; accelerateCount++) {
         __delay_us(1);
