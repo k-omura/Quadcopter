@@ -322,26 +322,26 @@ void main(void) {
     CLDuty = 0;
     CLInitialSpeedReached = 0;
     //initialize end
-    
+
     __delay_ms(1000);
 
     //main motor control part
     while (1) {
-        if (!CLEnable && CLDuty) { //start motor with open-loop
-            if (LockDetected) {
-                //initialize. first start or lock detected(CL)
-                duty = 0x00;
-                motorPosition = 0; //Motor initial position
-                CLEnable = 0; //Closed-loop enable flag
-                OLAccelerateCount = OLInitialSpeed;
-                chageDutySmoothly(OLDuty, 0); //initialize static var in function "prevDuty".
-                LockDetected = 0;
-                CLInitialSpeedReached = 0;
-                reachO2CSpeed = 0;
-                reachTargetSpeed = 1;
-                //initialize end
-            }
+        if (LockDetected) {
+            //initialize. first start or lock detected(CL)
+            duty = 0x00;
+            motorPosition = 0; //Motor initial position
+            CLEnable = 0; //Closed-loop enable flag
+            OLAccelerateCount = OLInitialSpeed;
+            chageDutySmoothly(OLDuty, 0); //initialize static var in function "prevDuty".
+            LockDetected = 0;
+            CLInitialSpeedReached = 0;
+            reachO2CSpeed = 0;
+            reachTargetSpeed = 1;
+            //initialize end
+        }
 
+        if (!CLEnable && CLDuty) { //start motor with open-loop
             setDuty(duty);
 
             duty = (duty < OLDuty) ? duty + 1 : OLDuty;
